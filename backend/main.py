@@ -4,9 +4,10 @@ import re
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
 import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from sentence_transformers import SentenceTransformer
 
 
 app = FastAPI(title="Movie Recommendation API")
@@ -83,40 +84,92 @@ genre_counts = (
 
 TOP_GENRES = genre_counts.head(10).index.tolist()
 
-tags_df["tag"] = tags_df["tag"].fillna("").astype(str).str.lower()
-tags_df = tags_df[tags_df["tag"].str.strip() != ""]
 
-merged_df = movies_df.merge(tags_df, on="movieId", how="inner")
-merged_df = merged_df.merge(ratings_df[["movieId", "rating"]], on="movieId", how="left")
+def build_recommendation_df() -> pd.DataFrame:
+    # Building a lightweight dataframe using tags and genres
+    tags_local = tags_df.copy()
+    tags_local["tag"] = tags_local["tag"].fillna("").astype(str).str.lower().str.strip()
+    tags_local = tags_local[tags_local["tag"] != ""]
 
-clean_df = merged_df[["movieId", "title", "genres", "tag", "rating"]].copy()
-clean_df["title"] = clean_df["title"].astype(str).apply(normalize_title)
+    tags_grouped = (
+        tags_local
+        .groupby("movieId", as_index=False)["tag"]
+        .agg(lambda x: " ".join(x))
+    )
 
-clean_df["genres"] = (
-    clean_df["genres"]
-    .fillna("")
-    .astype(str)
-    .str.replace("|", " ", regex=False)
-    .str.lower()
-    .str.strip()
-)
+    base = movies_df[["movieId", "title", "genres"]].copy()
+    base["title"] = base["title"].astype(str).apply(normalize_title)
 
-clean_df["tag"] = clean_df["tag"].fillna("").astype(str).str.lower().str.strip()
+    base["genres"] = (
+        base["genres"]
+        .fillna("")
+        .astype(str)
+        .str.replace("|", " ", regex=False)
+        .str.lower()
+        .str.strip()
+    )
 
-nlp_df = (
-    clean_df
-    .groupby(["movieId", "title", "genres"], as_index=False)
-    .agg({
-        "tag": lambda x: " ".join(x),
-        "rating": lambda x: round(x.mean(), 2)
-    })
-)
+    base = base.merge(tags_grouped, on="movieId", how="left")
+    base["tag"] = base["tag"].fillna("").astype(str).str.lower().str.strip()
 
-nlp_df["rating"] = nlp_df["rating"].fillna("not rated")
-nlp_df["text"] = (nlp_df["tag"] + " " + nlp_df["genres"]).str.strip()
+    base = base.merge(avg_rating_df, on="movieId", how="left")
+    base["avg_rating"] = base["avg_rating"].fillna(0.0)
 
-model = SentenceTransformer("all-MiniLM-L6-v2")
-embeddings = model.encode(nlp_df["text"], normalize_embeddings=True)
+    base["text"] = (base["tag"] + " " + base["genres"]).str.strip()
+
+    return base
+
+
+class TfidfRecommender:
+    def __init__(self, df: pd.DataFrame):
+        # Preparing TF-IDF vectorizer and document matrix
+        self.df = df.copy()
+
+        self.vectorizer = TfidfVectorizer(
+            stop_words="english",
+            max_features=50000,
+            ngram_range=(1, 2),
+        )
+
+        self.matrix = self.vectorizer.fit_transform(self.df["text"].fillna(""))
+
+    def recommend(self, query: str, n: int) -> list[dict]:
+        # Computing cosine similarity between query vector and TF-IDF matrix
+        q = (query or "").strip().lower()
+        if not q:
+            return []
+
+        query_vec = self.vectorizer.transform([q])
+        sims = cosine_similarity(query_vec, self.matrix).flatten()
+
+        top_indices = sims.argsort()[::-1][:n]
+
+        results = []
+        for idx in top_indices:
+            row = self.df.iloc[idx]
+            results.append({
+                "movieId": int(row["movieId"]),
+                "title": row["title"],
+                "rating": round(float(row["avg_rating"]), 2),
+                "similarity": float(sims[idx]),
+            })
+
+        results = sorted(results, key=lambda x: (-x["rating"], -x["similarity"]))
+
+        public_results = []
+        for i, r in enumerate(results, start=1):
+            public_results.append({
+                "rank": i,
+                "movieId": r["movieId"],
+                "title": r["title"],
+                "rating": r["rating"],
+            })
+
+        return public_results
+
+
+rec_df = build_recommendation_df()
+recommender = TfidfRecommender(rec_df)
 
 
 class FeedbackPayload(BaseModel):
@@ -126,7 +179,7 @@ class FeedbackPayload(BaseModel):
 
 @app.get("/")
 def root():
-    return {"message": "Movie Recommendation API running!"}
+    return {"message": "Movie Recommendation API running!", "mode": "lite-tfidf"}
 
 
 @app.get("/top-genres")
@@ -136,47 +189,7 @@ def top_genres():
 
 @app.get("/recommend")
 def recommend(query: str, n: int = 100):
-    query_emb = model.encode([query], normalize_embeddings=True)
-    sims = cosine_similarity(query_emb, embeddings).flatten()
-    top_indices = sims.argsort()[::-1][:n]
-
-    results = []
-    for idx in top_indices:
-        row = nlp_df.iloc[idx]
-
-        rating_value = row["rating"]
-        try:
-            numeric_rating = float(rating_value)
-        except Exception:
-            numeric_rating = None
-
-        results.append({
-            "movieId": int(row["movieId"]),
-            "title": row["title"],
-            "rating": rating_value,
-            "similarity": float(sims[idx]),
-            "numeric_rating": numeric_rating,
-        })
-
-    results = sorted(
-        results,
-        key=lambda x: (
-            x["numeric_rating"] is None,
-            -(x["numeric_rating"] or 0),
-            -x["similarity"],
-        )
-    )
-
-    public_results = []
-    for i, r in enumerate(results, start=1):
-        public_results.append({
-            "rank": i,
-            "movieId": r["movieId"],
-            "title": r["title"],
-            "rating": r["rating"],
-        })
-
-    return public_results
+    return recommender.recommend(query=query, n=n)
 
 
 @app.get("/movies-by-genre")
