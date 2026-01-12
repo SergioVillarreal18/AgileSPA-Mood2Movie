@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+const API_BASE = String(RAW_API_BASE).replace(/\/+$/, "");
 
 function loadLS(key, fallback) {
   try {
@@ -75,7 +76,7 @@ export default function App() {
       } catch {}
     }
     fetchTopGenres();
-  }, []);
+  }, [API_BASE]);
 
   const watchedIds = useMemo(() => new Set(watched.map((m) => m.movieId)), [watched]);
   const toWatchIds = useMemo(() => new Set(toWatch.map((m) => m.movieId)), [toWatch]);
