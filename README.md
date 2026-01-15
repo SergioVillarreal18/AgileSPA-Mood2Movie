@@ -2,38 +2,40 @@
 
 Mood2Movie is a Single Page Application (SPA) developed as a group project for the **Agile Project Management** course.
 
-The application recommends movies based on the user’s mood and preferences. The project was developed following agile practices such as incremental delivery, iterative development, and collaborative teamwork.
+The application helps users discover movies based on their mood and preferences, instead of searching by specific titles or actors. The project was developed following agile principles, emphasizing incremental delivery, iterative improvement, and close collaboration within the team.
 
 ---
 
 ## Project Overview
 
-The main objective of this project is to design and implement a simple but functional SPA while applying agile concepts in practice.
+The main objective of this project is to design and implement a simple yet functional SPA, while applying Agile Project Management concepts in a practical and realistic way.
 
-The focus is not only on technical implementation, but also on:
+Beyond the technical implementation, the project focuses on:
 
-- Clear separation of responsibilities  
-- Incremental feature development  
-- Collaboration within a development team  
-- Continuous improvement through iterations  
+- Clear separation of responsibilities between frontend and backend
+- Incremental feature development using small, manageable tasks
+- Collaboration within a cross-functional development team
+- Continuous improvement through feedback and iteration
 
 ---
 
 ## Application Architecture
 
-The project is composed of two main parts:
+The application follows a client–server architecture and is composed of two main parts:
 
-### Frontend
+### Frontend (SPA)
 
-- Single Page Application built with modern JavaScript technologies  
-- Provides the user interface for mood-based movie selection  
-- Communicates with the backend through REST API calls  
+- Single Page Application built with modern JavaScript technologies
+- Provides an intuitive user interface for mood-based movie discovery
+- Includes features such as movie search, genre browsing, watchlist management, and user feedback
+- Communicates with the backend through REST API calls
 
 ### Backend
 
-- REST API developed with FastAPI  
-- Processes movie data and generates recommendations  
-- Exposes endpoints consumed by the frontend  
+- REST API developed with FastAPI
+- Loads and processes movie datasets
+- Implements the recommendation logic based on text similarity
+- Exposes endpoints consumed by the frontend
 
 ---
 
@@ -48,9 +50,21 @@ The project is composed of two main parts:
 ### Backend
 - Python  
 - FastAPI  
-- Pandas  
-- Scikit-learn  
-- Sentence Transformers  
+- Pandas (data processing)
+- Scikit-learn (TF-IDF vectorization and cosine similarity)
+
+### API & Server 
+- Uvicorn (ASGI server for FastAPI)  
+
+### Data Source
+- CSV datasets: movies.csv, ratings.csv, tags.csv
+
+### Client-side Storage
+- Browser LocalStorage (watchlist and watched movies)
+
+### Deployment
+- Frontend: Vercel
+- Backend: Render
 
 ---
 
@@ -63,9 +77,9 @@ AgileSPA-Mood2Movie/
 │ ├── main.py
 │ ├── requirements.txt
 │ └── data/
-│ ├── movies.csv
-│ ├── ratings.csv
-│ └── tags.csv
+   │ ├── movies.csv
+   │ ├── ratings.csv
+   │ └── tags.csv
 │
 ├── frontend/
 │ ├── src/
@@ -75,6 +89,16 @@ AgileSPA-Mood2Movie/
 │
 └── README.md
 ```
+---
+
+## Application Features
+
+- Mood-based movie search using free-text input
+- Movie recommendations based on tags, genres, and ratings
+- Top genres view with ranked movies
+- Personal watchlist and watched list stored in the browser
+- Feedback section allowing users to submit comments about the application
+- Responsive and user-friendly interface
 
 ---
 
@@ -130,6 +154,17 @@ http://127.0.0.1:8000
   ```
 The frontend will be available at the URL shown in the terminal, typically at:
 http://localhost:5173
+
+---
+
+## Deployment
+The application is deployed and publicly accessible:
+
+- Frontend (Vercel):
+https://mood2movie-agilespa.vercel.app/
+
+- Backend (Render):
+https://mood2movie-backend.onrender.com/
 
 ---
 
