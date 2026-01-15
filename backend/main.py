@@ -40,7 +40,6 @@ tags_df = pd.read_csv(TAGS_PATH)
 
 
 def normalize_title(title: str) -> str:
-    # Normalizing MovieLens article formatting for readability
     if not isinstance(title, str):
         return title
 
@@ -86,7 +85,6 @@ TOP_GENRES = genre_counts.head(10).index.tolist()
 
 
 def build_recommendation_df() -> pd.DataFrame:
-    # Building a lightweight dataframe using tags and genres
     tags_local = tags_df.copy()
     tags_local["tag"] = tags_local["tag"].fillna("").astype(str).str.lower().str.strip()
     tags_local = tags_local[tags_local["tag"] != ""]
@@ -115,46 +113,93 @@ def build_recommendation_df() -> pd.DataFrame:
     base = base.merge(avg_rating_df, on="movieId", how="left")
     base["avg_rating"] = base["avg_rating"].fillna(0.0)
 
-    base["text"] = (base["tag"] + " " + base["genres"]).str.strip()
+    base["title_clean"] = (
+        base["title"]
+        .fillna("")
+        .astype(str)
+        .str.lower()
+        .str.replace(r"[^a-z0-9\s]+", " ", regex=True)
+        .str.replace(r"\s+", " ", regex=True)
+        .str.strip()
+    )
+
+    base["text"] = (
+        base["title_clean"] + " " +
+        base["tag"] + " " +
+        base["genres"] + " " +
+        base["genres"]
+    ).str.strip()
 
     return base
 
 
 class TfidfRecommender:
     def __init__(self, df: pd.DataFrame):
-        # Preparing TF-IDF vectorizer and document matrix
         self.df = df.copy()
 
         self.vectorizer = TfidfVectorizer(
             stop_words="english",
             max_features=50000,
             ngram_range=(1, 2),
+            min_df=2,
         )
 
         self.matrix = self.vectorizer.fit_transform(self.df["text"].fillna(""))
 
     def recommend(self, query: str, n: int) -> list[dict]:
-        # Computing cosine similarity between query vector and TF-IDF matrix
         q = (query or "").strip().lower()
         if not q:
             return []
 
-        query_vec = self.vectorizer.transform([q])
+        mood_expansions = {
+            "cry": "sad emotional drama tearjerker heartbreak",
+            "sad": "sad emotional drama melancholic tragedy",
+            "laugh": "funny comedy humorous silly parody",
+            "funny": "comedy humorous witty laugh",
+            "romantic": "romance love romantic relationship",
+            "love": "romance love romantic relationship",
+            "scared": "horror scary thriller suspense",
+            "fear": "horror scary thriller suspense",
+            "chill": "calm relaxing feel good slice of life",
+            "happy": "feel good uplifting comedy heartwarming",
+            "angry": "revenge intense action crime thriller",
+            "action": "action adventure thriller explosive",
+            "mystery": "mystery detective suspense thriller",
+            "anime": "anime animation japanese",
+        }
+
+        q_expanded = mood_expansions.get(q, q)
+
+        query_vec = self.vectorizer.transform([q_expanded])
         sims = cosine_similarity(query_vec, self.matrix).flatten()
 
-        top_indices = sims.argsort()[::-1][:n]
+        valid_indices = (sims > 0).nonzero()[0]
+        if len(valid_indices) == 0:
+            return []
+
+        candidate_k = max(n * 10, 300)
+        valid_sims = sims[valid_indices]
+        top_local = valid_sims.argsort()[::-1][:candidate_k]
+        top_indices = valid_indices[top_local]
 
         results = []
         for idx in top_indices:
             row = self.df.iloc[idx]
+
+            sim = float(sims[idx])
+            rating = float(row["avg_rating"]) if row["avg_rating"] is not None else 0.0
+            rating_norm = rating / 5.0
+
+            score = 0.85 * sim + 0.15 * rating_norm
+
             results.append({
                 "movieId": int(row["movieId"]),
                 "title": row["title"],
-                "rating": round(float(row["avg_rating"]), 2),
-                "similarity": float(sims[idx]),
+                "rating": round(rating, 2),
+                "score": score,
             })
 
-        results = sorted(results, key=lambda x: (-x["rating"], -x["similarity"]))
+        results = sorted(results, key=lambda x: -x["score"])[:n]
 
         public_results = []
         for i, r in enumerate(results, start=1):
@@ -188,13 +233,15 @@ def top_genres():
 
 
 @app.get("/recommend")
-def recommend(query: str, n: int = 100):
+def recommend(query: str, n: int = 50):
+    n = max(1, min(int(n), 200))
     return recommender.recommend(query=query, n=n)
 
 
 @app.get("/movies-by-genre")
 def movies_by_genre(genre: str, limit: int = 50):
     g_title = genre.strip().title()
+    limit = max(1, min(int(limit), 200))
 
     df = movies_with_rating_df[
         movies_with_rating_df["genres_raw"].str.contains(g_title, na=False)
@@ -216,7 +263,6 @@ def movies_by_genre(genre: str, limit: int = 50):
 
 @app.post("/feedback")
 def submit_feedback(payload: FeedbackPayload):
-    # Validating message only (no storage). This endpoint exists for UI realism.
     message = (payload.message or "").strip()
     if not message:
         return {"ok": False, "error": "Message is empty."}
